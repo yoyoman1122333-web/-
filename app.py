@@ -65,11 +65,14 @@ def calculate_real_rating(reviews, original_rating, w_length, w_extreme, w_empty
 
 # ==================== 2. API 撈取資料 ====================
 def fetch_restaurants(api_key, lat, lng, radius, open_now):
+    # 修正後的精準新版 API 網址
     url = "https://googleapis.com"
+    
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": api_key,
-        "X-Goog-FieldMask": "places.id,places.displayName,places.primaryType,places.rating,places.userRatingCount,places.currentOpeningHours,places.reviews"
+        # 確保 FieldMask 內部的欄位名稱與新版 API 完全對齊
+        "X-Goog-FieldMask": "places.id,places.displayName,places.rating,places.userRatingCount,places.currentOpeningHours,places.reviews"
     }
         
     payload = {
@@ -77,7 +80,10 @@ def fetch_restaurants(api_key, lat, lng, radius, open_now):
         "maxResultCount": 20,
         "locationRestriction": {
             "circle": {
-                "center": {"latitude": lat, "longitude": lng},
+                "center": {
+                    "latitude": float(lat), 
+                    "longitude": float(lng)
+                },
                 "radius": float(radius)
             }
         }
@@ -91,7 +97,7 @@ def fetch_restaurants(api_key, lat, lng, radius, open_now):
                 return [r for r in results if r.get('currentOpeningHours', {}).get('openNow') == True]
             return results
         else:
-            st.error(f"API 請求失敗: {res.text}")
+            st.error(f"API 請求失敗，錯誤代碼 {res.status_code}。請檢查 Google Cloud 後台是否已正確「啟用 Places API (New)」。")
             return []
     except Exception as e:
         st.error(f"連線失敗: {e}")
