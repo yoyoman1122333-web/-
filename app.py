@@ -2,6 +2,8 @@ import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime
+import folium
+from streamlit_folium import st_folium
 
 # ==================== 1. 核心演算法：水軍與時間密集度過濾 ====================
 def calculate_real_rating(reviews, original_rating, w_length, w_extreme, w_empty, w_time):
@@ -17,7 +19,6 @@ def calculate_real_rating(reviews, original_rating, w_length, w_extreme, w_empty
         dt = None
         if time_str:
             try:
-                # 移除非 ISO 格式的微秒部分並解析
                 clean_time = time_str.split('.')[0].replace('Z', '')
                 dt = datetime.strptime(clean_time, '%Y-%m-%dT%H:%M:%S')
             except:
@@ -32,7 +33,6 @@ def calculate_real_rating(reviews, original_rating, w_length, w_extreme, w_empty
         
     parsed_reviews.sort(key=lambda x: x['date'] if x['date'] else datetime.min)
     
-    # 時間密集度偵測：前後評論在 24 小時內則視為異常
     for i in range(len(parsed_reviews)):
         if i > 0 and parsed_reviews[i]['date'] and parsed_reviews[i-1]['date']:
             delta_seconds = abs((parsed_reviews[i]['date'] - parsed_reviews[i-1]['date']).total_seconds())
@@ -63,18 +63,13 @@ def calculate_real_rating(reviews, original_rating, w_length, w_extreme, w_empty
     return round(total_weighted_stars / total_trust_score, 2)
 
 # ==================== 2. API 撈取資料 ====================
-def fetch_restaurants(api_key, location, radius, open_now):
+def fetch_restaurants(api_key, lat, lng, radius, open_now):
     url = "https://googleapis.com"
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": api_key,
         "X-Goog-FieldMask": "places.id,places.displayName,places.primaryType,places.rating,places.userRatingCount,places.currentOpeningHours,places.reviews"
     }
-    try:
-        lat, lng = map(float, location.split(','))
-    except:
-        st.error("經緯度格式錯誤，請輸入如: 22.6253,120.3094")
-        return []
         
     payload = {
         "includedTypes": ["restaurant"],
@@ -106,11 +101,44 @@ st.set_page_config(page_title="AI 真實餐廳推薦系統", layout="wide")
 st.title("🛡️ AI 餐廳防假點評推薦系統")
 st.caption("自動過濾文字過短、極端評分、密集刷榜的水軍留言，還原最真實的店家實力。")
 
+# 側邊欄設定
 st.sidebar.header("🔑 API 金鑰設定")
 api_key = st.sidebar.text_input("輸入 Google Places API Key", type="password")
 
-st.sidebar.header("📍 搜尋條件")
-location = st.sidebar.text_input("我的地點 (緯度,經度)", "22.6253,120.3094")
+st.sidebar.header("📍 選擇我的地點")
+st.sidebar.write("請在下方地圖上「點擊任意位置」來選擇搜尋中心點：")
+
+# 初始化地圖預設中心點 (台灣中心附近或前次點擊點)
+if 'clicked_lat' not in st.session_state:
+    st.session_state.clicked_lat = 23.6  # 預設緯度
+    st.session_state.clicked_lng = 121.0 # 預設經度
+
+# 建立 Folium 地圖物件
+m = folium.Map(location=[st.session_state.clicked_lat, st.session_state.clicked_lng], zoom_start=8)
+
+# 如果已經有點擊過，在地圖上畫一個藍色圈圈標示搜尋範圍
+if 'clicked_lat' in st.session_state and st.session_state.clicked_lat != 23.6:
+    folium.Marker(
+        [st.session_state.clicked_lat, st.session_state.clicked_lng], 
+        popup="您的搜尋中心"
+    ).add_to(m)
+
+# 在側邊欄渲染地圖並捕捉點擊事件
+with st.sidebar:
+    map_data = st_folium(m, height=300, width=300, key="folium_map")
+
+# 捕捉地圖點擊並更新經緯度
+if map_data and map_data.get("last_clicked"):
+    clicked = map_data["last_clicked"]
+    if st.session_state.clicked_lat != clicked["lat"] or st.session_state.clicked_lng != clicked["lng"]:
+        st.session_state.clicked_lat = clicked["lat"]
+        st.session_state.clicked_lng = clicked["lng"]
+        st.rerun()  # 立即重新整理網頁以顯示新標記
+
+# 顯示目前選中的座標
+st.sidebar.success(f"目前選取座標：\n緯度: {st.session_state.clicked_lat:.4f}\n經度: {st.session_state.clicked_lng:.4f}")
+
+# 搜尋半徑與時間條件
 radius = st.sidebar.slider("搜尋半徑 (公尺)", min_value=500, max_value=10000, value=2000, step=500)
 open_now = st.sidebar.checkbox("只顯示目前營業中", value=True)
 
@@ -120,12 +148,15 @@ w_empty = st.sidebar.slider("空白零字扣分權重", 0.0, 0.5, 0.2, 0.05)
 w_extreme = st.sidebar.slider("無理由極端分扣分權重", 0.0, 0.5, 0.2, 0.05)
 w_time = st.sidebar.slider("時間密集爆發扣分權重", 0.0, 0.5, 0.3, 0.05)
 
+# 主畫面按鈕
 if st.button("🔍 開始偵測並分析前 20 家餐廳"):
     if not api_key:
         st.warning("請先在左側輸入您的 Google Places API Key！")
+    elif st.session_state.clicked_lat == 23.6:
+        st.warning("請先在左側地圖上點擊一個你想搜尋的具體城鎮或位置！")
     else:
         with st.spinner("正在抓取周邊店家並對評論進行分析..."):
-            raw_data = fetch_restaurants(api_key, location, radius, open_now)
+            raw_data = fetch_restaurants(api_key, st.session_state.clicked_lat, st.session_state.clicked_lng, radius, open_now)
             
             if not raw_data:
                 st.info("沒有找到符合條件的餐廳。")
