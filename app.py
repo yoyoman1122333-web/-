@@ -65,7 +65,8 @@ def calculate_real_rating(reviews, original_rating, w_length, w_extreme, w_empty
 
 # ==================== 2. API 撈取資料 ====================
 def fetch_restaurants(api_key, lat, lng, radius, open_now):
-    # 修正後的精準新版 API 網址
+  # 修正前：url = "https://googleapis.com"
+    # 請替換成下方這行（精準指向新版鄰近搜尋端點）：
     url = "https://googleapis.com"
     
     headers = {
